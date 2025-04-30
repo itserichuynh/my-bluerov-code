@@ -169,10 +169,10 @@ class Video():
 # Helper Functions
 # -----------------------------
 
-def correct_sonar_scan_with_rp(sonar_data, desired_range_meters, num_samples, roll_rad_list, pitch_rad_list):
+def correct_sonar_scan_with_rp(sonar_data, desired_range_meters, num_samples, roll_rad_list, pitch_rad_list, angle_start):
     corrected_points = []
     num_angles = sonar_data.shape[0]
-    angles_rad = np.arange(num_angles) * (2 * np.pi / 400)
+    angles_rad = (np.arange(num_angles) + angle_start) * (2 * np.pi / 400)
     radii = np.linspace(0, desired_range_meters, num_samples)
 
     for angle_idx, angle_rad in enumerate(angles_rad):
@@ -203,10 +203,10 @@ def correct_sonar_scan_with_rp(sonar_data, desired_range_meters, num_samples, ro
                 corrected_points.append((rotated_point[0], rotated_point[1]))
     return corrected_points
 
-def correct_sonar_scan_with_rpy(sonar_data, desired_range_meters, num_samples, roll_rad_list, pitch_rad_list, yaw_rad_list):
+def correct_sonar_scan_with_rpy(sonar_data, desired_range_meters, num_samples, roll_rad_list, pitch_rad_list, yaw_rad_list, angle_start):
     corrected_points = []
     num_angles = sonar_data.shape[0]
-    angles_rad = np.arange(num_angles) * (2 * np.pi / 400)
+    angles_rad = (np.arange(num_angles) + angle_start)* (2 * np.pi / 400)
     radii = np.linspace(0, desired_range_meters, num_samples)
 
     for angle_idx, angle_rad in enumerate(angles_rad):
@@ -244,10 +244,10 @@ def correct_sonar_scan_with_rpy(sonar_data, desired_range_meters, num_samples, r
                 corrected_points.append((rotated_2d[0], rotated_2d[1]))
     return corrected_points
 
-def sonar_scan_without_correction(sonar_data, desired_range_meters, num_samples):
+def sonar_scan_without_correction(sonar_data, desired_range_meters, num_samples, angle_start):
     raw_points = []
     num_angles = sonar_data.shape[0]
-    angles_rad = np.arange(num_angles) * (2 * np.pi / 400)
+    angles_rad = (np.arange(num_angles) + angle_start) * (2 * np.pi / 400)
     radii = np.linspace(0, desired_range_meters, num_samples)
 
     for angle_idx, angle_rad in enumerate(angles_rad):
@@ -312,7 +312,10 @@ video = Video(int(args.camera))
 print("Camera Stream Initialized")
 
 # Set Sonar Parameters
-num_angles = 400
+# num_angles = 400
+angle_start = 140
+angle_end = 260
+angle_range = angle_end - angle_start + 1
 num_samples = 200
 desired_range_meters = int(args.sonar_range)
 speed_of_sound = 1500
@@ -338,13 +341,13 @@ sonar_writer.writerow(["timestamp", "angle"] + [f"sample_{i}" for i in range(num
 # Data Collection
 # -----------------------------
 
-sonar_data = np.zeros((num_angles, num_samples), dtype=np.uint8)
+sonar_data = np.zeros((angle_range, num_samples), dtype=np.uint8)
 roll_rad_list, pitch_rad_list, yaw_rad_list = [], [], []
 
 print("Starting synchronized data collection...")
 
 t_start = time.time()
-for angle in range(num_angles):
+for angle in range(angle_start, angle_end + 1):
     timestamp = time.time()
     response = p.transmitAngle(angle)
 
