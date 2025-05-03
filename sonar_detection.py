@@ -602,7 +602,8 @@ def sonar_detection(connection, video, ping_sonar, angle_start, angle_end, angle
     cv2.imwrite(f"record_data/sonar_cart/{timestamp}.png", resized_cartesian_image)
     
     # Show the resized Cartesian image
-    plt.figure(figsize=(12, 6))
+    plt.ion()
+    fig1 = plt.figure(figsize=(12, 6))
     
     plt.subplot(1, 2, 1)
     plt.imshow(resized_cartesian_image, cmap='gray')
@@ -617,6 +618,8 @@ def sonar_detection(connection, video, ping_sonar, angle_start, angle_end, angle
     plt.colorbar(label='Intensity')
     
     plt.show()
+    input("Press Enter to close the plot...") # Wait for user input
+    plt.close(fig1)
     # -----------------------------
     # Correction and Mapping
     # -----------------------------
@@ -681,10 +684,10 @@ def sonar_detection(connection, video, ping_sonar, angle_start, angle_end, angle
     print(f"Saved {len(corrected_points_rpy)} corrected sonar points with rpy!")
 
     # Build Grids
-    grid_raw = OccupancyGrid2D(width_m=int(args.sonar_range)*2, height_m=int(args.sonar_range)*2, resolution_m=0.05)
+    grid_raw = OccupancyGrid2D(width_m=desired_range_meters*2, height_m=desired_range_meters*2, resolution_m=0.05)
     grid_raw.add_points(raw_points)
 
-    grid_rp = OccupancyGrid2D(width_m=int(args.sonar_range)*2, height_m=int(args.sonar_range)*2, resolution_m=0.05)
+    grid_rp = OccupancyGrid2D(width_m=desired_range_meters*2, height_m=desired_range_meters*2, resolution_m=0.05)
     grid_rp.add_points(corrected_points_rp)
 
     # grid_rpy = OccupancyGrid2D(width_m=int(args.sonar_range)*2, height_m=int(args.sonar_range)*2, resolution_m=0.05)
@@ -696,7 +699,8 @@ def sonar_detection(connection, video, ping_sonar, angle_start, angle_end, angle
 
     print("Plotting maps...")
 
-    fig, axs = plt.subplots(1, 2, figsize=(10, 5))
+    plt.ion()
+    fig2, axs = plt.subplots(1, 2, figsize=(10, 5))
 
     axs[0].imshow(grid_raw.grid, cmap='gray', origin='lower')
     axs[0].set_title('Raw Sonar (No Correction)')
@@ -716,39 +720,42 @@ def sonar_detection(connection, video, ping_sonar, angle_start, angle_end, angle
     # axs[2].set_ylabel('Y')
     # axs[2].grid(False)
 
-    # Draw robot heading arrow
-    center_x = grid_rp.width // 2
-    center_y = grid_rp.height // 2
+    # # Draw robot heading arrow
+    # center_x = grid_rp.width // 2
+    # center_y = grid_rp.height // 2
 
-    # Use last yaw angle recorded
-    # robot_yaw = yaw_rad_list[-1] # in radians
+    # # Use last yaw angle recorded
+    # # robot_yaw = yaw_rad_list[-1] # in radians
 
-    # Arrow parameters
-    arrow_length = 20  # in pixels (adjust as needed)
+    # # Arrow parameters
+    # arrow_length = 20  # in pixels (adjust as needed)
 
-    # print(f"YAWWWW is {robot_yaw}")
+    # # print(f"YAWWWW is {robot_yaw}")
 
-    # Calculate end of arrow
-    arrow_dx = arrow_length * np.cos(np.pi)
-    arrow_dy = arrow_length * np.sin(np.pi)
+    # # Calculate end of arrow
+    # arrow_dx = arrow_length * np.cos(np.pi)
+    # arrow_dy = arrow_length * np.sin(np.pi)
 
-    print(f'{arrow_dx}, {arrow_dy}')
+    # print(f'{arrow_dx}, {arrow_dy}')
 
-    # Plot on the last corrected grid (axs[2])
-    # axs[2].arrow(
-    #     center_x, center_y,
-    #     arrow_dx, arrow_dy,
-    #     head_width=5, head_length=10, fc='red', ec='red'
-    # )
+    # # Plot on the last corrected grid (axs[2])
+    # # axs[2].arrow(
+    # #     center_x, center_y,
+    # #     arrow_dx, arrow_dy,
+    # #     head_width=5, head_length=10, fc='red', ec='red'
+    # # )
 
-    # Optionally for other plots (you can comment if you want only one)
-    axs[0].arrow(center_x, center_y, arrow_dx, arrow_dy, head_width=5, head_length=10, fc='red', ec='red')
-    axs[1].arrow(center_x, center_y, arrow_dx, arrow_dy, head_width=5, head_length=10, fc='red', ec='red')
+    # # Optionally for other plots (you can comment if you want only one)
+    # axs[0].arrow(center_x, center_y, arrow_dx, arrow_dy, head_width=5, head_length=10, fc='red', ec='red')
+    # axs[1].arrow(center_x, center_y, arrow_dx, arrow_dy, head_width=5, head_length=10, fc='red', ec='red')
 
 
     plt.tight_layout()
     plt.savefig(f"record_data/plots/imu_sonar_{datetime_str}.png")
     plt.show()
+
+    input("Press Enter to close the map plot and continue...")
+    plt.close(fig2)
 
     print("Finished full mapping and plotting!")
     cv2.destroyWindow('frame')
