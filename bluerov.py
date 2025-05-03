@@ -10,6 +10,9 @@ from bluerov_ping.brping import Ping360
 import matplotlib.pyplot as plt
 from datetime import datetime
 import argparse
+import threading
+import torch
+from ultralytics import YOLO  # Import YOLOv8 for inference
 
 parser = argparse.ArgumentParser(description="BlueROV stuff lol")
 parser.add_argument('--udp', action="store", required=False, type=str, help="Ping UDP server. E.g: 192.168.2.2:9092")
@@ -492,7 +495,7 @@ def cv2_keyboard_control(connection, video):
 
     cv2.destroyWindow("camera frame")
 
-def sonar_detection(connection, video, ping_sonar, angle_start, angle_end, angle_range, num_samples, desired_range_meters):
+def sonar_detection(connection, video, ping_sonar, angle_start, angle_end, angle_range, num_samples, desired_range_meters, device, model):
     # Add a timestamp string for this scan
     datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -624,145 +627,233 @@ def sonar_detection(connection, video, ping_sonar, angle_start, angle_end, angle
     # Correction and Mapping
     # -----------------------------
 
-    print("Checking how much the robot rotated during scanning...")
+    # print("Checking how much the robot rotated during scanning...")
 
-    # Convert yaw list from radians to degrees for easier interpretation
-    yaw_deg_list = np.degrees(yaw_rad_list)
+    # # Convert yaw list from radians to degrees for easier interpretation
+    # yaw_deg_list = np.degrees(yaw_rad_list)
 
-    # Unwrap angles to avoid jumps from +180 to -180
-    yaw_deg_list_unwrapped = np.unwrap(np.radians(yaw_deg_list)) * 180/np.pi
+    # # Unwrap angles to avoid jumps from +180 to -180
+    # yaw_deg_list_unwrapped = np.unwrap(np.radians(yaw_deg_list)) * 180/np.pi
 
-    # Compute differences between consecutive yaw values
-    yaw_deltas = np.diff(yaw_deg_list_unwrapped)
+    # # Compute differences between consecutive yaw values
+    # yaw_deltas = np.diff(yaw_deg_list_unwrapped)
 
-    # Compute average rotation speed per ping
-    average_yaw_rate_deg_per_ping = np.mean(np.abs(yaw_deltas))
+    # # Compute average rotation speed per ping
+    # average_yaw_rate_deg_per_ping = np.mean(np.abs(yaw_deltas))
 
-    # Estimate time per ping (approximate)
-    full_scan_time_sec = t_end - t_start
-    time_per_ping_sec = full_scan_time_sec / len(yaw_rad_list)
+    # # Estimate time per ping (approximate)
+    # full_scan_time_sec = t_end - t_start
+    # time_per_ping_sec = full_scan_time_sec / len(yaw_rad_list)
 
-    # Convert to degrees per second
-    average_yaw_rate_deg_per_sec = average_yaw_rate_deg_per_ping / time_per_ping_sec
+    # # Convert to degrees per second
+    # average_yaw_rate_deg_per_sec = average_yaw_rate_deg_per_ping / time_per_ping_sec
 
-    print(f"Estimated average yaw rotation per ping: {average_yaw_rate_deg_per_ping:.2f} deg/ping")
-    print(f"Estimated average yaw rotation speed: {average_yaw_rate_deg_per_sec:.2f} deg/sec")
+    # print(f"Estimated average yaw rotation per ping: {average_yaw_rate_deg_per_ping:.2f} deg/ping")
+    # print(f"Estimated average yaw rotation speed: {average_yaw_rate_deg_per_sec:.2f} deg/sec")
 
-    input("Press enter to continue...")
+    # input("Press enter to continue...")
 
-    print("Correcting sonar data...")
+    # print("Correcting sonar data...")
 
-    raw_points = sonar_scan_without_correction(sonar_data, desired_range_meters, num_samples, angle_start)
-    corrected_points_rp = correct_sonar_scan_with_rp(sonar_data, desired_range_meters, num_samples, roll_rad_list, pitch_rad_list, angle_start)
-    corrected_points_rpy = correct_sonar_scan_with_rpy(sonar_data, desired_range_meters, num_samples, roll_rad_list, pitch_rad_list, yaw_rad_list, angle_start)
+    # raw_points = sonar_scan_without_correction(sonar_data, desired_range_meters, num_samples, angle_start)
+    # corrected_points_rp = correct_sonar_scan_with_rp(sonar_data, desired_range_meters, num_samples, roll_rad_list, pitch_rad_list, angle_start)
+    # corrected_points_rpy = correct_sonar_scan_with_rpy(sonar_data, desired_range_meters, num_samples, roll_rad_list, pitch_rad_list, yaw_rad_list, angle_start)
 
-    # Save uncorrected points
-    with open(f"record_data/sonar_raw_points/raw_points_{datetime_str}.csv", "w", newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(["x", "y"])
-        for (x, y) in raw_points:
-            writer.writerow([x, y])
+    # # Save uncorrected points
+    # with open(f"record_data/sonar_raw_points/raw_points_{datetime_str}.csv", "w", newline='') as f:
+    #     writer = csv.writer(f)
+    #     writer.writerow(["x", "y"])
+    #     for (x, y) in raw_points:
+    #         writer.writerow([x, y])
 
-    print(f"Saved {len(raw_points)} raw sonar points!")
+    # print(f"Saved {len(raw_points)} raw sonar points!")
 
-    # Save corrected points
-    with open(f"record_data/sonar_corrected_points/corrected_points_rp_{datetime_str}.csv", "w", newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(["x", "y"])
-        for (x, y) in corrected_points_rp:
-            writer.writerow([x, y])
+    # # Save corrected points
+    # with open(f"record_data/sonar_corrected_points/corrected_points_rp_{datetime_str}.csv", "w", newline='') as f:
+    #     writer = csv.writer(f)
+    #     writer.writerow(["x", "y"])
+    #     for (x, y) in corrected_points_rp:
+    #         writer.writerow([x, y])
 
-    print(f"Saved {len(corrected_points_rp)} corrected sonar points with rp!")
+    # print(f"Saved {len(corrected_points_rp)} corrected sonar points with rp!")
 
-    # Save corrected points
-    with open(f"record_data/sonar_corrected_points/corrected_points_rpy_{datetime_str}.csv", "w", newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(["x", "y"])
-        for (x, y) in corrected_points_rpy:
-            writer.writerow([x, y])
+    # # Save corrected points
+    # with open(f"record_data/sonar_corrected_points/corrected_points_rpy_{datetime_str}.csv", "w", newline='') as f:
+    #     writer = csv.writer(f)
+    #     writer.writerow(["x", "y"])
+    #     for (x, y) in corrected_points_rpy:
+    #         writer.writerow([x, y])
 
-    print(f"Saved {len(corrected_points_rpy)} corrected sonar points with rpy!")
+    # print(f"Saved {len(corrected_points_rpy)} corrected sonar points with rpy!")
 
-    # Build Grids
-    grid_raw = OccupancyGrid2D(width_m=desired_range_meters*2, height_m=desired_range_meters*2, resolution_m=0.05)
-    grid_raw.add_points(raw_points)
+    # # Build Grids
+    # grid_raw = OccupancyGrid2D(width_m=desired_range_meters*2, height_m=desired_range_meters*2, resolution_m=0.05)
+    # grid_raw.add_points(raw_points)
 
-    grid_rp = OccupancyGrid2D(width_m=desired_range_meters*2, height_m=desired_range_meters*2, resolution_m=0.05)
-    grid_rp.add_points(corrected_points_rp)
+    # grid_rp = OccupancyGrid2D(width_m=desired_range_meters*2, height_m=desired_range_meters*2, resolution_m=0.05)
+    # grid_rp.add_points(corrected_points_rp)
 
-    # grid_rpy = OccupancyGrid2D(width_m=int(args.sonar_range)*2, height_m=int(args.sonar_range)*2, resolution_m=0.05)
-    # grid_rpy.add_points(corrected_points_rpy)
+    # # grid_rpy = OccupancyGrid2D(width_m=int(args.sonar_range)*2, height_m=int(args.sonar_range)*2, resolution_m=0.05)
+    # # grid_rpy.add_points(corrected_points_rpy)
 
-    # -----------------------------
-    # Plot all three maps
-    # -----------------------------
+    # # -----------------------------
+    # # Plot all three maps
+    # # -----------------------------
 
-    print("Plotting maps...")
+    # print("Plotting maps...")
+
+    # plt.ion()
+    # fig2, axs = plt.subplots(1, 2, figsize=(10, 5))
+
+    # axs[0].imshow(grid_raw.grid, cmap='gray', origin='lower')
+    # axs[0].set_title('Raw Sonar (No Correction)')
+    # axs[0].set_xlabel('X')
+    # axs[0].set_ylabel('Y')
+    # axs[0].grid(False)
+
+    # axs[1].imshow(grid_rp.grid, cmap='gray', origin='lower')
+    # axs[1].set_title('Roll-Pitch Corrected')
+    # axs[1].set_xlabel('X')
+    # axs[1].set_ylabel('Y')
+    # axs[1].grid(False)
+
+    # # axs[2].imshow(grid_rpy.grid, cmap='gray', origin='lower')
+    # # axs[2].set_title('Roll-Pitch-Yaw Corrected')
+    # # axs[2].set_xlabel('X')
+    # # axs[2].set_ylabel('Y')
+    # # axs[2].grid(False)
+
+    # # # Draw robot heading arrow
+    # # center_x = grid_rp.width // 2
+    # # center_y = grid_rp.height // 2
+
+    # # # Use last yaw angle recorded
+    # # # robot_yaw = yaw_rad_list[-1] # in radians
+
+    # # # Arrow parameters
+    # # arrow_length = 20  # in pixels (adjust as needed)
+
+    # # # print(f"YAWWWW is {robot_yaw}")
+
+    # # # Calculate end of arrow
+    # # arrow_dx = arrow_length * np.cos(np.pi)
+    # # arrow_dy = arrow_length * np.sin(np.pi)
+
+    # # print(f'{arrow_dx}, {arrow_dy}')
+
+    # # # Plot on the last corrected grid (axs[2])
+    # # # axs[2].arrow(
+    # # #     center_x, center_y,
+    # # #     arrow_dx, arrow_dy,
+    # # #     head_width=5, head_length=10, fc='red', ec='red'
+    # # # )
+
+    # # # Optionally for other plots (you can comment if you want only one)
+    # # axs[0].arrow(center_x, center_y, arrow_dx, arrow_dy, head_width=5, head_length=10, fc='red', ec='red')
+    # # axs[1].arrow(center_x, center_y, arrow_dx, arrow_dy, head_width=5, head_length=10, fc='red', ec='red')
+
+
+    # plt.tight_layout()
+    # plt.savefig(f"record_data/plots/imu_sonar_{datetime_str}.png")
+    # plt.show()
+
+    # input("Press Enter to close the map plot and continue...")
+    # plt.close(fig2)
+
+    # print("Finished full mapping and plotting!")
+    # cv2.destroyWindow('frame')
+
+    # yolo detection
+    sonar_tensor = torch.tensor(resized_cartesian_image, dtype=torch.float32) / 255.0  # Normalize
+    sonar_tensor = sonar_tensor.unsqueeze(0).repeat(3, 1, 1)  # → (3, H, W)
+    sonar_tensor = sonar_tensor.unsqueeze(0).to(device)       # → (1, 3, H, W)
+
+    # Run YOLO inference
+    results = model(sonar_tensor, verbose=False)  # Disable verbose for speed
+
+    cartesian_img_bgr = cv2.cvtColor(resized_cartesian_image, cv2.COLOR_GRAY2BGR)
+    box_drawn = False
 
     plt.ion()
-    fig2, axs = plt.subplots(1, 2, figsize=(10, 5))
+    fig3 = plt.figure(figsize=(6, 6))
 
-    axs[0].imshow(grid_raw.grid, cmap='gray', origin='lower')
-    axs[0].set_title('Raw Sonar (No Correction)')
-    axs[0].set_xlabel('X')
-    axs[0].set_ylabel('Y')
-    axs[0].grid(False)
+    for result in results:
+        det = result.boxes.xyxy.cpu().numpy()
+        confs = result.boxes.conf.cpu().numpy()
+        classes = result.boxes.cls.cpu().numpy()
+        names = model.names
 
-    axs[1].imshow(grid_rp.grid, cmap='gray', origin='lower')
-    axs[1].set_title('Roll-Pitch Corrected')
-    axs[1].set_xlabel('X')
-    axs[1].set_ylabel('Y')
-    axs[1].grid(False)
+        if len(det):
+            # Filter boxes by confidence
+            valid_indices = np.where(confs >= 0.5)[0]
 
-    # axs[2].imshow(grid_rpy.grid, cmap='gray', origin='lower')
-    # axs[2].set_title('Roll-Pitch-Yaw Corrected')
-    # axs[2].set_xlabel('X')
-    # axs[2].set_ylabel('Y')
-    # axs[2].grid(False)
+            if len(valid_indices) > 0:
+                # Find the index of the box with the highest confidence
+                best_idx = valid_indices[np.argmax(confs[valid_indices])]
+                box = det[best_idx]
+                conf = confs[best_idx]
+                cls = classes[best_idx]
 
-    # # Draw robot heading arrow
-    # center_x = grid_rp.width // 2
-    # center_y = grid_rp.height // 2
+                # Convert YOLO (x_center, y_center, width, height) to (x1, y1, x2, y2)
+                x_center, y_center, w, h = map(int, box)
+                x_min = int(x_center - w / 2)
+                y_min = int(y_center - h / 2)
+                x_max = int(x_center + w / 2)
+                y_max = int(y_center + h / 2)
 
-    # # Use last yaw angle recorded
-    # # robot_yaw = yaw_rad_list[-1] # in radians
+                center_img = 512 / 2  # if 512x512
 
-    # # Arrow parameters
-    # arrow_length = 20  # in pixels (adjust as needed)
+                x_center = (x_min + x_max) / 2
+                y_center = (y_min + y_max) / 2
+                
+                # find displacement from the robot
+                dx = x_center - center_img
+                dy = y_center - center_img
 
-    # # print(f"YAWWWW is {robot_yaw}")
+                # Compute radius and scale to world distance
+                pixel_r = np.sqrt(dx**2 + dy**2)
+                real_r = minR + (pixel_r / center_img) * (desired_range_meters - 0)
 
-    # # Calculate end of arrow
-    # arrow_dx = arrow_length * np.cos(np.pi)
-    # arrow_dy = arrow_length * np.sin(np.pi)
-
-    # print(f'{arrow_dx}, {arrow_dy}')
-
-    # # Plot on the last corrected grid (axs[2])
-    # # axs[2].arrow(
-    # #     center_x, center_y,
-    # #     arrow_dx, arrow_dy,
-    # #     head_width=5, head_length=10, fc='red', ec='red'
-    # # )
-
-    # # Optionally for other plots (you can comment if you want only one)
-    # axs[0].arrow(center_x, center_y, arrow_dx, arrow_dy, head_width=5, head_length=10, fc='red', ec='red')
-    # axs[1].arrow(center_x, center_y, arrow_dx, arrow_dy, head_width=5, head_length=10, fc='red', ec='red')
+                # Compute angle relative to robot (0 at top, clockwise)
+                theta = (np.arctan2(dy, dx) + np.pi / 2) % (2 * np.pi)
+                theta_deg = np.degrees(theta)
 
 
-    plt.tight_layout()
-    plt.savefig(f"record_data/plots/imu_sonar_{datetime_str}.png")
-    plt.show()
+                cv2.rectangle(cartesian_img_bgr, (x_min, y_min), (x_max, y_max), (255, 0, 0), 2)
+                # Put the label text slightly above the top-left corner of the box
+                label = f"conf: {conf:.2f}"
+                cv2.putText(
+                    cartesian_img_bgr,
+                    label,
+                    (x_min, y_min - 10),  # Text position
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,                  # Font scale
+                    (255, 255, 255),      # Text color (white)
+                    1,                    # Thickness
+                    cv2.LINE_AA           # Anti-aliased
+                )
+                box_drawn = True
+                print(f"found one box: conf={conf:.2f}")
 
-    input("Press Enter to close the map plot and continue...")
-    plt.close(fig2)
+    cv2.circle(cartesian_img_bgr, (512//2, 512//2), radius=5, color=(255, 255, 255), thickness=-1)
+    plt.clf()
+    plt.imshow(cartesian_img_bgr)
+    if not box_drawn:
+        plt.title("No detection")
+    else:
+        plt.title(f"Detected Taskbox at r={real_r:.2f}m, theta={theta_deg:.2f}deg")
+    
+    # Save output image
+    cv2.imwrite(f"record_data/detection_sonar/{timestamp}.png", cartesian_img_bgr)
 
-    print("Finished full mapping and plotting!")
-    cv2.destroyWindow('frame')
+    input("Press Enter to close the plot...") # Wait for user input
+    plt.close(fig3)
+    cv2.destroyAllWindows()
+    
+
 # -----------------------------
 # Initialize Sensors
 # -----------------------------
-
 connection = mavutil.mavlink_connection(args.mavlink)
 connection.wait_heartbeat()
 boot_time = time.time()
@@ -779,6 +870,25 @@ print("Ping360 Sonar Initialized")
 video = Video(int(args.camera))
 
 print("Camera Stream Initialized")
+
+# Global variable for YOLO model
+model = None
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
+# Load YOLO model in a separate thread to prevent blocking
+def load_yolo_model():
+    global model
+    print("Loading YOLO model... This may take a few seconds.")
+    model = YOLO("./runs/train/exp10/weights/best.pt").to(device)  # Load model onto GPU if available
+    print("YOLO model loaded successfully!")
+
+# Start loading YOLO in the background
+yolo_thread = threading.Thread(target=load_yolo_model)
+yolo_thread.start()
+
+while model is None:
+    print("Waiting for YOLO model to load...")
+    time.sleep(1)
 
 os.makedirs("record_data/raw_data_logs", exist_ok=True)
 os.makedirs("record_data/sonar_raw_points", exist_ok=True)
@@ -815,30 +925,42 @@ while True:
     elif cmd == "hold":
         depth_hold_mode(connection)
     elif cmd.startswith("scan"):
-        _, value1, value2, value3 = cmd.split()
-        angle_start, angle_end = int(value1), int(value2)
-        angle_range = angle_end - angle_start + 1
-        num_samples = 1200
-        desired_range_meters = int(value3)
-        speed_of_sound = 1500
-        sample_period = int((2 * desired_range_meters) / (num_samples * speed_of_sound * 25e-9))
-        ping_sonar.set_sample_period(sample_period)
-        ping_sonar.set_number_of_samples(num_samples)
+        try:
+            # _, value1, value2, value3 = cmd.split()
+            # angle_start, angle_end = int(value1), int(value2)
+            _, value3 = cmd.split()
+            angle_start, angle_end = 0, 399
+            angle_range = angle_end - angle_start + 1
+            num_samples = 1200
+            desired_range_meters = int(value3)
+            speed_of_sound = 1500
+            sample_period = int((2 * desired_range_meters) / (num_samples * speed_of_sound * 25e-9))
+            ping_sonar.set_sample_period(sample_period)
+            ping_sonar.set_number_of_samples(num_samples)
 
-        print(f"Sonar params: angle_start {angle_start}, angle_end {angle_end}, range {desired_range_meters} m")
+            print(f"Sonar params: angle_start {angle_start}, angle_end {angle_end}, range {desired_range_meters} m")
 
-        sonar_detection(connection, video, ping_sonar, angle_start, angle_end, angle_range, num_samples, desired_range_meters)
+            # arm_brov(connection)
+            # depth_hold_mode(connection)
+            sonar_detection(connection, video, ping_sonar, angle_start, angle_end, angle_range, num_samples, desired_range_meters, device, model)
+        except Exception as e:
+            print(f"Invalid scan command. Use: scan <start_angle> <end_angle> <range>\nError: {e}") 
     elif cmd.startswith("depth"):
         try:
             _, value = cmd.split()
             depth_val = float(value)
             print(f"Setting target depth to {depth_val} meters...")
+
+            arm_brov(connection)
+            depth_hold_mode(connection)
             set_target_depth(connection, depth_val, boot_time)
         except Exception as e:
             print(f"Invalid depth command. Use: depth -X\nError: {e}")
     elif cmd == "alt":
         get_altitude(connection, "AHRS2")
     elif cmd == "wasd":
+        arm_brov(connection)
+        manual_mode(connection)
         cv2_keyboard_control(connection, video)
     elif cmd == "quit":
         print("Exiting.")
@@ -853,7 +975,6 @@ while True:
     elif cmd == "stop":
         stop(connection)
     elif cmd == "options":
-        print("\nReady for commands:")
         print("  - Type 'arm' to arm BlueROV")
         print("  - Type 'disarm' to disarm BlueROV")
         print("  - Type 'wasd' to control BlueROV")
