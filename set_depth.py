@@ -8,6 +8,15 @@ import math
 from pymavlink import mavutil
 # Imports for attitude
 from pymavlink.quaternion import QuaternionBase
+import argparse
+
+parser = argparse.ArgumentParser(description="Collecting imu, camera and sonar. RPY correction on sonar.")
+parser.add_argument('--target_depth', action="store", required=False, type=str, help="Target depth for brov. E.g: -1.0")
+
+args = parser.parse_args()
+if args.target_depth is None:
+    parser.print_help()
+    exit(1)
 
 def set_target_depth(depth):
     """ Sets the target depth while in depth-hold mode.
@@ -59,35 +68,49 @@ def set_target_attitude(roll, pitch, yaw):
     )
 
 # Create the connection
-master = mavutil.mavlink_connection('udpin:0.0.0.0:14550')
+master = mavutil.mavlink_connection('udpin:0.0.0.0:14551')
 boot_time = time.time()
 # Wait a heartbeat before sending commands
 master.wait_heartbeat()
+
+print("Connected to BlueROV2")
 
 # arm ArduSub autopilot and wait until confirmed
 master.arducopter_arm()
 master.motors_armed_wait()
 
 # set the desired operating mode
-DEPTH_HOLD = 'ALT_HOLD'
+DEPTH_HOLD = 'ALT_HOLD'  # MANUAL or ATL_HOLD
 DEPTH_HOLD_MODE = master.mode_mapping()[DEPTH_HOLD]
 while not master.wait_heartbeat().custom_mode == DEPTH_HOLD_MODE:
     master.set_mode(DEPTH_HOLD)
 
+print("Start Dpeth Hold Mode")
+
+print(f"Set target depth to {float(args.target_depth)}")
+
 # set a depth target
-set_target_depth(-0.5)
+# set_target_depth(float(args.target_depth))
+
+input("press enter to enter MANUAL mode and disarm...")
 
 # go for a spin
 # (set target yaw from 0 to 500 degrees in steps of 10, one update per second)
-roll_angle = pitch_angle = 0
-for yaw_angle in range(0, 500, 10):
-    set_target_attitude(roll_angle, pitch_angle, yaw_angle)
-    time.sleep(1) # wait for a second
+# roll_angle = pitch_angle = 0
+# for yaw_angle in range(0, 500, 10):
+#     set_target_attitude(roll_angle, pitch_angle, yaw_angle)
+#     time.sleep(1) # wait for a second
 
-# spin the other way with 3x larger steps
-for yaw_angle in range(500, 0, -30):
-    set_target_attitude(roll_angle, pitch_angle, yaw_angle)
-    time.sleep(1)
+# # spin the other way with 3x larger steps
+# for yaw_angle in range(500, 0, -30):
+#     set_target_attitude(roll_angle, pitch_angle, yaw_angle)
+#     time.sleep(1)
+
+# set the desired operating mode
+DEPTH_HOLD = 'MANUAL'  # MANUAL or ATL_HOLD
+DEPTH_HOLD_MODE = master.mode_mapping()[DEPTH_HOLD]
+while not master.wait_heartbeat().custom_mode == DEPTH_HOLD_MODE:
+    master.set_mode(DEPTH_HOLD)
 
 # clean up (disarm) at the end
 master.arducopter_disarm()
