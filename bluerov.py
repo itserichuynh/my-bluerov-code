@@ -10,9 +10,13 @@ from bluerov_ping.brping import Ping360
 import matplotlib.pyplot as plt
 from datetime import datetime
 import argparse
-import threading
 import torch
-from ultralytics import YOLO  # Import YOLOv8 for inference
+# from ultralytics import YOLO  # Import YOLOv8 for inference
+import pathlib
+import threading
+
+# Patch WindowsPath to work on Linux
+pathlib.WindowsPath = pathlib.PosixPath
 
 parser = argparse.ArgumentParser(description="BlueROV stuff lol")
 parser.add_argument('--udp', action="store", required=False, type=str, help="Ping UDP server. E.g: 192.168.2.2:9092")
@@ -603,26 +607,17 @@ def sonar_detection(connection, video, ping_sonar, angle_start, angle_end, angle
     
     # Save output image
     cv2.imwrite(f"record_data/sonar_cart/{timestamp}.png", resized_cartesian_image)
+
+    # Show image using OpenCV
+    cv2.namedWindow("Recorded Sonar", cv2.WINDOW_NORMAL)
+    cv2.resizeWindow("Recorded Sonar", 512, 512)
+    cv2.imshow("Recorded Sonar", resized_cartesian_image)
+    print("Press any key to close the detection window...")
+    cv2.waitKey(0)
+    cv2.destroyWindow("Recorded Sonar")
+    cv2.destroyAllWindows()
     
-    # Show the resized Cartesian image
-    plt.ion()
-    fig1 = plt.figure(figsize=(12, 6))
     
-    plt.subplot(1, 2, 1)
-    plt.imshow(resized_cartesian_image, cmap='gray')
-    plt.title("Resized Cartesian Sonar Image (512x512)")
-    plt.axis("off")
-    
-    # Plot the sonar image in Polar coordinates
-    plt.subplot(1, 2, 2, polar=True)
-    theta_grid, r_grid = np.meshgrid(angles, np.linspace(0, max_radius, width))
-    plt.pcolormesh(theta_grid, r_grid, sonar_data.T, shading='auto', cmap='gray')
-    plt.title("Polar Sonar Image")
-    plt.colorbar(label='Intensity')
-    
-    plt.show()
-    input("Press Enter to close the plot...") # Wait for user input
-    plt.close(fig1)
     # -----------------------------
     # Correction and Mapping
     # -----------------------------
@@ -763,92 +758,73 @@ def sonar_detection(connection, video, ping_sonar, angle_start, angle_end, angle
     # print("Finished full mapping and plotting!")
     # cv2.destroyWindow('frame')
 
-    # yolo detection
-    sonar_tensor = torch.tensor(resized_cartesian_image, dtype=torch.float32) / 255.0  # Normalize
-    sonar_tensor = sonar_tensor.unsqueeze(0).repeat(3, 1, 1)  # → (3, H, W)
-    sonar_tensor = sonar_tensor.unsqueeze(0).to(device)       # → (1, 3, H, W)
+    # Convert grayscale sonar image to BGR (YOLOv5 expects 3 channels)
+    # img_bgr = cv2.cvtColor(resized_cartesian_image, cv2.COLOR_GRAY2BGR)
 
-    # Run YOLO inference
-    results = model(sonar_tensor, verbose=False)  # Disable verbose for speed
+    # # Run YOLOv5 inference using NumPy image directly
+    # results = model(img_bgr)  # model handles normalization internally
 
-    cartesian_img_bgr = cv2.cvtColor(resized_cartesian_image, cv2.COLOR_GRAY2BGR)
-    box_drawn = False
+    # # Convert grayscale image to BGR for drawing
+    # cartesian_img_bgr = cv2.cvtColor(resized_cartesian_image, cv2.COLOR_GRAY2BGR)
+    # box_drawn = False
 
-    plt.ion()
-    fig3 = plt.figure(figsize=(6, 6))
+    # # Create plot window
+    # fig3 = plt.figure(figsize=(6, 6))
 
-    for result in results:
-        det = result.boxes.xyxy.cpu().numpy()
-        confs = result.boxes.conf.cpu().numpy()
-        classes = result.boxes.cls.cpu().numpy()
-        names = model.names
+    # # Get detection DataFrame
+    # df = results.pandas().xyxy[0]  # detections for the first image
 
-        if len(det):
-            # Filter boxes by confidence
-            valid_indices = np.where(confs >= 0.5)[0]
+    # for _, row in df.iterrows():
+    #     conf = row['confidence']
+    #     if conf < 0.5:
+    #         continue
 
-            if len(valid_indices) > 0:
-                # Find the index of the box with the highest confidence
-                best_idx = valid_indices[np.argmax(confs[valid_indices])]
-                box = det[best_idx]
-                conf = confs[best_idx]
-                cls = classes[best_idx]
+    #     x_min = int(row['xmin'])
+    #     y_min = int(row['ymin'])
+    #     x_max = int(row['xmax'])
+    #     y_max = int(row['ymax'])
+    #     class_id = int(row['class'])
+    #     label = f"{model.names[class_id]} {conf:.2f}"
 
-                # Convert YOLO (x_center, y_center, width, height) to (x1, y1, x2, y2)
-                x_center, y_center, w, h = map(int, box)
-                x_min = int(x_center - w / 2)
-                y_min = int(y_center - h / 2)
-                x_max = int(x_center + w / 2)
-                y_max = int(y_center + h / 2)
+    #     # Center of detection
+    #     x_center = (x_min + x_max) / 2
+    #     y_center = (y_min + y_max) / 2
+    #     center_img = 512 / 2
 
-                center_img = 512 / 2  # if 512x512
+    #     dx = x_center - center_img
+    #     dy = y_center - center_img
 
-                x_center = (x_min + x_max) / 2
-                y_center = (y_min + y_max) / 2
-                
-                # find displacement from the robot
-                dx = x_center - center_img
-                dy = y_center - center_img
+    #     pixel_r = np.sqrt(dx**2 + dy**2)
+    #     real_r = 0 + (pixel_r / center_img) * desired_range_meters
+    #     theta = (np.arctan2(dy, dx) + np.pi / 2) % (2 * np.pi)
+    #     theta_deg = np.degrees(theta)
 
-                # Compute radius and scale to world distance
-                pixel_r = np.sqrt(dx**2 + dy**2)
-                real_r = minR + (pixel_r / center_img) * (desired_range_meters - 0)
+    #     # Draw bounding box
+    #     cv2.rectangle(cartesian_img_bgr, (x_min, y_min), (x_max, y_max), (255, 0, 0), 2)
+    #     cv2.putText(cartesian_img_bgr, label, (x_min, y_min - 10),
+    #                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+    #     box_drawn = True
+    #     print(f"found one box: conf={conf:.2f}")
 
-                # Compute angle relative to robot (0 at top, clockwise)
-                theta = (np.arctan2(dy, dx) + np.pi / 2) % (2 * np.pi)
-                theta_deg = np.degrees(theta)
+    # if not box_drawn:
+    #     print("No task box found...")
+    # # Draw robot center
+    # cv2.circle(cartesian_img_bgr, (512//2, 512//2), radius=5, color=(255, 255, 255), thickness=-1)
 
+    # # Save output
+    # output_path = f"record_data/detection_sonar/{timestamp}.png"
+    # cv2.imwrite(output_path, cartesian_img_bgr)
 
-                cv2.rectangle(cartesian_img_bgr, (x_min, y_min), (x_max, y_max), (255, 0, 0), 2)
-                # Put the label text slightly above the top-left corner of the box
-                label = f"conf: {conf:.2f}"
-                cv2.putText(
-                    cartesian_img_bgr,
-                    label,
-                    (x_min, y_min - 10),  # Text position
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,                  # Font scale
-                    (255, 255, 255),      # Text color (white)
-                    1,                    # Thickness
-                    cv2.LINE_AA           # Anti-aliased
-                )
-                box_drawn = True
-                print(f"found one box: conf={conf:.2f}")
-
-    cv2.circle(cartesian_img_bgr, (512//2, 512//2), radius=5, color=(255, 255, 255), thickness=-1)
-    plt.clf()
-    plt.imshow(cartesian_img_bgr)
-    if not box_drawn:
-        plt.title("No detection")
-    else:
-        plt.title(f"Detected Taskbox at r={real_r:.2f}m, theta={theta_deg:.2f}deg")
+    # # Show image using OpenCV
+    # cv2.namedWindow("Detection Result", cv2.WINDOW_NORMAL)
+    # cv2.resizeWindow("Detection Result", 512, 512)
+    # cv2.imshow("Detection Result", cartesian_img_bgr)
+    # print("Press any key to close the detection window...")
+    # cv2.waitKey(0)
+    # cv2.destroyWindow("Detection Result")
     
-    # Save output image
-    cv2.imwrite(f"record_data/detection_sonar/{timestamp}.png", cartesian_img_bgr)
-
-    input("Press Enter to close the plot...") # Wait for user input
-    plt.close(fig3)
-    cv2.destroyAllWindows()
+    ahrs_log.close()
+    sonar_log.close()
     
 
 # -----------------------------
@@ -858,6 +834,9 @@ connection = mavutil.mavlink_connection(args.mavlink)
 connection.wait_heartbeat()
 boot_time = time.time()
 print("Connected to BlueROV2 AHRS2")
+
+disarm_brov(connection)
+manual_mode(connection)
 
 request_message_interval(connection, "AHRS2", 10)
 
@@ -871,24 +850,31 @@ video = Video(int(args.camera))
 
 print("Camera Stream Initialized")
 
-# Global variable for YOLO model
-model = None
-device = "cuda" if torch.cuda.is_available() else "cpu"
+# # Global variable for YOLOv5 model
+# model = None
+# device = "cuda" if torch.cuda.is_available() else "cpu"
 
-# Load YOLO model in a separate thread to prevent blocking
-def load_yolo_model():
-    global model
-    print("Loading YOLO model... This may take a few seconds.")
-    model = YOLO("./runs/train/exp10/weights/best.pt").to(device)  # Load model onto GPU if available
-    print("YOLO model loaded successfully!")
+# # Load YOLOv5 model in a separate thread
+# def load_yolo_model():
+#     global model
+#     print("Loading YOLOv5 model... This may take a few seconds.")
+#     model = torch.hub.load(
+#         'ultralytics/yolov5',
+#         'custom',
+#         path='../yolov5/runs/train/exp10/weights/best.pt',
+#         force_reload=True  # also helps prevent cache issues
+#     )
+#     model.to(device)
+#     print("YOLOv5 model loaded successfully!")
 
-# Start loading YOLO in the background
-yolo_thread = threading.Thread(target=load_yolo_model)
-yolo_thread.start()
+# # Start background loading thread
+# yolo_thread = threading.Thread(target=load_yolo_model)
+# yolo_thread.start()
 
-while model is None:
-    print("Waiting for YOLO model to load...")
-    time.sleep(1)
+# while model is None:
+#     print("Waiting for YOLOv5 model to load...")
+#     time.sleep(1)
+
 
 os.makedirs("record_data/raw_data_logs", exist_ok=True)
 os.makedirs("record_data/sonar_raw_points", exist_ok=True)
@@ -896,6 +882,7 @@ os.makedirs("record_data/sonar_corrected_points", exist_ok=True)
 os.makedirs("record_data/plots", exist_ok=True)
 os.makedirs("record_data/camera", exist_ok=True)
 os.makedirs("record_data/sonar_cart/", exist_ok=True)
+os.makedirs("record_data/detection_sonar/", exist_ok=True)
 
 
 print("\nReady for commands:")
@@ -940,8 +927,8 @@ while True:
 
             print(f"Sonar params: angle_start {angle_start}, angle_end {angle_end}, range {desired_range_meters} m")
 
-            # arm_brov(connection)
-            # depth_hold_mode(connection)
+            arm_brov(connection)
+            depth_hold_mode(connection)
             sonar_detection(connection, video, ping_sonar, angle_start, angle_end, angle_range, num_samples, desired_range_meters, device, model)
         except Exception as e:
             print(f"Invalid scan command. Use: scan <start_angle> <end_angle> <range>\nError: {e}") 
@@ -951,8 +938,8 @@ while True:
             depth_val = float(value)
             print(f"Setting target depth to {depth_val} meters...")
 
-            arm_brov(connection)
-            depth_hold_mode(connection)
+            # arm_brov(connection)
+            # depth_hold_mode(connection)
             set_target_depth(connection, depth_val, boot_time)
         except Exception as e:
             print(f"Invalid depth command. Use: depth -X\nError: {e}")

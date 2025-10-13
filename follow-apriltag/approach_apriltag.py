@@ -4,6 +4,8 @@ import numpy as np
 import apriltag
 from pymavlink import mavutil
 from camera_stream import Video
+import csv
+from datetime import datetime
 
 from pynput import keyboard
 
@@ -139,10 +141,18 @@ boot_time = time.time()
 # while not connection.wait_heartbeat().custom_mode == MANUAL_MODE:
 #     connection.set_mode(MANUAL)
 
+print("Switched to DEPTH HOLD mode.")
+DEPTH_HOLD = 'ALT_HOLD'  # MANUAL or ATL_HOLD
+DEPTH_HOLD_MODE = connection.mode_mapping()[DEPTH_HOLD]
+while not connection.wait_heartbeat().custom_mode == DEPTH_HOLD_MODE:
+    connection.set_mode(DEPTH_HOLD)
+
 # # Arm the vehicle
-# connection.arducopter_arm()
-# connection.motors_armed_wait()
-# print("Motors armed")
+connection.arducopter_arm()
+connection.motors_armed_wait()
+print("Motors armed")
+
+set_target_depth(connection, -0.5, boot_time)
 
 # Send a positive x value, negative y, negative z,
 # positive rotation and no button.
@@ -176,9 +186,9 @@ object_points = np.array([
 # ----------------------------
 # PID Controllers Setup
 # ----------------------------
-forward_pid = PID(kp=700.0, ki=0.0, kd=50.0, output_limits=(-1000, 1000))
+forward_pid = PID(kp=400.0, ki=0.0, kd=50.0, output_limits=(-1000, 1000))
 lateral_pid = PID(kp=500.0, ki=0.0, kd=20.0, output_limits=(-1000, 1000))
-vertical_pid = PID(kp=500.0, ki=0.0, kd=20.0, output_limits=(-500, 500))
+vertical_pid = PID(kp=950.0, ki=0.0, kd=20.0, output_limits=(-500, 500))
 
 # Desired offset from the tag in tag's frame
 desired_position_in_tag = np.array([0.45, 0.0, 0.0])  # 45cm in front
@@ -190,6 +200,19 @@ plt.figure(figsize=(10, 9))
 
 parked = False # bool to hold whether the robot is parked
 
+# Add a timestamp string for this scan
+datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+# Open CSV files
+ahrs_log = open(f"record_data/raw_data_logs/ahrs_log_{datetime_str}.csv", "w", newline='')
+ahrs_writer = csv.writer(ahrs_log)
+ahrs_writer.writerow(["timestamp", "roll", "pitch", "yaw", "altitude", "lat", "lng"])
+
+tag_log = open(f"record_data/raw_data_logs/tag_pos_{datetime_str}.csv", "w", newline='')
+tag_writer = csv.writer(tag_log)
+tag_writer.writerow(["timestamp", "x_cam", "y_cam", "z_cam"])
+
+last_seen_yaw_dir = 1
+
 print("Starting tag-following loop (PnP mode). Press 'q' to quit.")
 try:
     while True:
@@ -199,10 +222,25 @@ try:
             continue
         frame = raw.copy()
         # save frames
-        cv2.imwrite(f"camera/{timestamp}.png", frame)
+        cv2.imwrite(f"record_data/camera/{timestamp}.png", frame)
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         dt = time.time() - last_time
         last_time = time.time()
+
+        ahrs_msg = connection.recv_match(type="AHRS2", blocking=True, timeout=1)
+        if ahrs_msg is None:
+            print("AHRS2 message timeout!")
+            continue
+
+        ahrs_data = ahrs_msg.to_dict()
+        roll_rad = ahrs_data.get('roll', 0.0)
+        pitch_rad = ahrs_data.get('pitch', 0.0)
+        yaw_rad = ahrs_data.get('yaw', 0.0)
+        altitude = ahrs_data.get('altitude', 0.0)
+        lat = ahrs_data.get('lat', 0)
+        lng = ahrs_data.get('lng', 0)
+
+        ahrs_writer.writerow([timestamp, roll_rad, pitch_rad, yaw_rad, altitude, lat, lng])
 
         tags = detector.detect(gray)
         if tags:
@@ -216,6 +254,9 @@ try:
                 # Get tag position in camera frame
                 tvec = tvec.flatten()
                 tag_position_cam = np.array([tvec[2], -tvec[0], -tvec[1]])
+                # desired_position_in_tag[0] = tag_position_cam[0]
+
+                tag_writer.writerow([timestamp] + tag_position_cam.tolist())
 
                 # store the last direction an apriltag was detected
                 if tag_position_cam[1] > 0: # left
@@ -257,7 +298,7 @@ try:
                     break
 
                 print(f"[cur pos] x={tag_position_cam[0]:.2f}, y={tag_position_cam[1]:.2f}, z={tag_position_cam[2]:.2f} | [error] x={-x_err:.2f}, y={-y_err:.2f}, z={-z_err:.2f} | x_cmd={x_cmd}, y_cmd={y_cmd}, z_cmd={z_cmd}")
-                # send_control(x=x_cmd, y=y_cmd, z=z_cmd, r=0)
+                send_control(x=x_cmd, y=y_cmd, z=z_cmd, r=0)
 
                 # Visual feedback
                 for corner in tag.corners:
@@ -268,10 +309,10 @@ try:
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
             else:
                 print("PnP failed — holding position")
-                # send_control(0, 0, 500, 0)
+                send_control(0, 0, 500, 0)
         else:
             print("No tag detected — recovering now")
-            # send_control(0, 0, 500, 300 * last_seen_yaw_dir)
+            send_control(0, 0, 500, 200 * last_seen_yaw_dir)
 
         # Display frame
         cv2.namedWindow('AprilTag PnP Following', cv2.WINDOW_NORMAL)
@@ -316,10 +357,10 @@ cv2.destroyAllWindows()
 
 if parked:
     print("Switched to DEPTH HOLD mode.")
-    # DEPTH_HOLD = 'ATL_HOLD'  # MANUAL or ATL_HOLD
-    # DEPTH_HOLD_MODE = connection.mode_mapping()[DEPTH_HOLD]
-    # while not connection.wait_heartbeat().custom_mode == DEPTH_HOLD_MODE:
-    #     connection.set_mode(DEPTH_HOLD)
+    DEPTH_HOLD = 'ALT_HOLD'  # MANUAL or ATL_HOLD
+    DEPTH_HOLD_MODE = connection.mode_mapping()[DEPTH_HOLD]
+    while not connection.wait_heartbeat().custom_mode == DEPTH_HOLD_MODE:
+        connection.set_mode(DEPTH_HOLD)
 
 # request_message_interval("AHRS2", 10)
 # try:
@@ -329,15 +370,18 @@ if parked:
 
 input("Press enter to exit...")
 
+ahrs_log.close()
+tag_log.close()
+
 print("Activate MANUAL mode")
 # set the desired operating mode
-# MANUAL = 'MANUAL'
-# MANUAL_MODE = connection.mode_mapping()[MANUAL]
-# while not connection.wait_heartbeat().custom_mode == MANUAL_MODE:
-#     connection.set_mode(MANUAL)
+MANUAL = 'MANUAL'
+MANUAL_MODE = connection.mode_mapping()[MANUAL]
+while not connection.wait_heartbeat().custom_mode == MANUAL_MODE:
+    connection.set_mode(MANUAL)
 
 # Disarm
 print("Disarming...")
-# connection.arducopter_disarm()
-# connection.motors_disarmed_wait()
-# print("Motors disarmed.")
+connection.arducopter_disarm()
+connection.motors_disarmed_wait()
+print("Motors disarmed.")
